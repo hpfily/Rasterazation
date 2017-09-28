@@ -4,7 +4,10 @@
 #include <iostream>
 #include <d3d11.h>
 #include <d3dx11.h>
+#include <math.h>
 
+#define  PI 3.1415926
+#define  hudu(x)  (x*PI/180) 
 
 #define COLOR(r,g,b) (r<<12+b<<8+g<<4+0xFF)
 
@@ -29,7 +32,7 @@ ID3D11RenderTargetView* g_pRenderTargetView = NULL;
 ID3D11Texture2D*                g_pTempTexture = NULL;
 UINT*                                   g_pFB[HEIGHT];
 
-typedef struct Vertex
+typedef struct DrawVertex
 {
 	struct
 	{
@@ -37,6 +40,7 @@ typedef struct Vertex
 		int y;
 		int z;
 	};
+#if 0
 	union
 	{
 		struct  //R B G A
@@ -48,14 +52,116 @@ typedef struct Vertex
 		};
 		U32 color;
 	};
+#endif
+	
 #if 1
-	void operator= (Vertex right)
+	void operator= (DrawVertex right)
 	{
-		memcpy(this, &right, sizeof(Vertex));
+		memcpy(this, &right, sizeof(DrawVertex));
 	}
 #endif
-}Vertex;
+}DrawVertex;
 
+typedef struct vec4
+{
+	union
+	{
+		float v[4];
+		struct
+		{
+			float x;
+			float y;
+			float z;
+			float w;
+		};
+	};
+
+	vec4(float x,float y,float z,float w):x(x),y(y),z(z),w(w){};
+	vec4():x(0),y(0),z(0),w(0){};
+	void operator=(vec4 right)
+	{
+		memcpy(this,&right,sizeof(vec4));
+	}
+	
+}vec4;
+
+typedef struct matrix4
+{
+	float m[4][4];
+	matrix4()
+	{
+		memset(&m[0][0],0,4*4*sizeof(float));
+		for(int i=0;i<4;i++)
+		{
+			m[i][i]=1.0f;
+		}
+	}
+	matrix4(float src[4][4])
+	{
+		memcpy(this->m,src,sizeof(this->m));
+	}
+	vec4 operator*(vec4 &right)
+	{
+		vec4 res;
+		for (int aRow=0;aRow<4;aRow++)
+		{
+			for (int aCol=0;aCol<4;aCol++)
+			{
+				res.v[aRow]+=m[aRow][aCol]*right.v[aCol];
+			}
+		}
+
+		return res;
+	}
+	matrix4 operator*(matrix4 &right)
+	{
+		matrix4 res;
+		memset(res.m,0,sizeof(res.m));
+		
+		for (int aRow=0;aRow<4;aRow++)
+		{
+			for (int bCol=0;bCol<4;bCol++)
+			{
+				for (int aCol=0;aCol<4;aCol++)
+				{
+					res.m[aRow][bCol]+=m[aRow][aCol]*right.m[aCol][bCol];
+				}
+			}
+		}
+		return res;
+
+	}
+
+	void operator=(matrix4 right)
+	{
+		memcpy(this,&right,sizeof(matrix4));
+	}
+
+}matrix4;
+
+typedef struct Camera :public vec4
+{
+	Camera(float x,float y,float z,float w):vec4(x,y,z,w){};
+	matrix4 getViewTrasMat(float theta)
+	{
+		matrix4 View;
+		for (int i=0;i<3;i++)
+		{
+			View.m[i][3]=-this->v[i];
+		}
+		float r[4][4]=
+		{
+			{0,cos(theta),0,-sin(theta)},
+			{0,1,0,0},
+			{sin(theta),0,cos(theta),0},
+			{0,0,0,1}
+		};
+		matrix4 rot(r);
+		View=View*rot;
+		
+		return View;
+	}
+}Camera;
 
 #ifdef _DEBUG 
 void MyPrint(char* format, ...)
@@ -282,7 +388,7 @@ void DrawLine(int x0, int y0, int x1, int y1, UINT color)
 	}
 }
 
-void DrawUPTriangle(Vertex* v0, Vertex* v1, Vertex* v2)
+void DrawUPTriangle(DrawVertex* v0, DrawVertex* v1, DrawVertex* v2)
 {
 	int x0, x1, x2, y0, y1, y2;
 	x0 = v0->x, x1 = v1->x, x2 = v2->x;
@@ -300,7 +406,7 @@ void DrawUPTriangle(Vertex* v0, Vertex* v1, Vertex* v2)
 		DrawLine(xL, yL, xR, yR, _COLOR);
 	}
 }
-void DrawDownTriangle(Vertex* v0, Vertex* v1, Vertex* v2)
+void DrawDownTriangle(DrawVertex* v0, DrawVertex* v1, DrawVertex* v2)
 {
 	int x0, x1, x2, y0, y1, y2;
 	x0 = v0->x, x1 = v1->x, x2 = v2->x;
@@ -318,7 +424,7 @@ void DrawDownTriangle(Vertex* v0, Vertex* v1, Vertex* v2)
 		DrawLine(xL, yL, xR, yR, _COLOR);
 	}
 }
-void SortVertex(Vertex *V[])
+void SortDrawVertex(DrawVertex *V[])
 {
 	//v0 -> v1 -> v2  high-> low 
 	for (int i = 0; i<3; i++)
@@ -329,17 +435,17 @@ void SortVertex(Vertex *V[])
 			{
 				swap(V[i], V[j]);
 			}
-			//                      MyPrint("v0 =%d, v1=%d, v2=%d  j=%d \n", V[0]->y, V[1]->y, V[2]->y, j);
+			// MyPrint("v0 =%d, v1=%d, v2=%d  j=%d \n", V[0]->y, V[1]->y, V[2]->y, j);
 		}
 	}
 
 	return;
 }
-void DrawTriangle(Vertex V0, Vertex V1, Vertex V2)
+void DrawTriangle(DrawVertex V0, DrawVertex V1, DrawVertex V2)
 {
 
-	Vertex* V[3] = { &V0,&V1,&V2 };   //V0 y max   V2 y min
-	SortVertex(V);
+	DrawVertex* V[3] = { &V0,&V1,&V2 };   //V0 y max   V2 y min
+	SortDrawVertex(V);
 	if (V[1]->y==V[2]->y)
 	{
 		DrawUPTriangle(V[0], V[1], V[2]);
@@ -350,7 +456,7 @@ void DrawTriangle(Vertex V0, Vertex V1, Vertex V2)
 	}
 	else
 	{
-		Vertex vadd;
+		DrawVertex vadd;
 		vadd.y = V[1]->y;
 		float factor = ((float)vadd.y - V[2]->y) / (V[0]->y - V[2]->y);
 		vadd.x = interp(factor, V[2]->x, V[0]->x);
@@ -407,14 +513,34 @@ void Render()
 
 	}
 #if 0
-	Vertex p0; p0.x=-100,p0.y=100;
-	Vertex p1; p1.x=100,p1.y=100;
-	Vertex p2; p2.x=-100,p2.y=-100;
-	Vertex p3; p3.x=100, p3.y=-100;
+	DrawVertex p0; p0.x=-100,p0.y=100;
+	DrawVertex p1; p1.x=100,p1.y=100;
+	DrawVertex p2; p2.x=-100,p2.y=-100;
+	DrawVertex p3; p3.x=100, p3.y=-100;
 	DrawTriangle(p0, p1, p2);
 	DrawTriangle(p1, p2, p3);
 #endif 
+	vec4 v0(0.5f,0.0f,0.0f,1);
+	vec4 v1(-0.5f,0.0f,0.0f,1);
+	vec4 v2(0.0f,0.5f,1.0f,1);
 
+	Camera cam(0.0f,0.0f,-2.0f,1);
+	static int a=30;
+	matrix4 matView= cam.getViewTrasMat(hudu(a));
+	a+=30;
+	vec4 t0=matView*v0;
+	vec4 t1=matView*v1;
+	vec4 t2=matView*v2;
+	
+	t0.x/=t0.z,t0.y/=t0.z;
+	t1.x/=t1.z,t1.y/=t1.z;
+	t2.x/=t2.z,t2.y/=t2.z;
+
+	DrawVertex p0; p0.x=t0.x*WIDTH,p0.y=t0.y*WIDTH;
+	DrawVertex p1; p1.x=t1.x*WIDTH,p1.y=t1.y*WIDTH;
+	DrawVertex p2; p2.x=t2.x*WIDTH,p2.y=t2.y*WIDTH;
+	DrawTriangle(p0, p1, p2);
+	
 	g_pImmediateContext->Unmap(g_pTempTexture, 0);
 	g_pImmediateContext->CopyResource(pBackBuffer, g_pTempTexture);
 	g_pSwapChain->Present(0, 0);
@@ -453,7 +579,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 		CleanupDevice();
 		return ERROR;
 	}
-
 	MSG msg = { 0 };
 	while (WM_QUIT != msg.message)
 	{
